@@ -34,12 +34,17 @@ Le pattern Outbox peut être combiné avec le pattern d'état pour gérer une da
 
 Avec le pattern d'état, l'application peut stocker l'état de chaque demande dans la base de données, y compris la date à laquelle la demande doit être appliquée.
 
-En utilisant le pattern Outbox, l'application peut différer le traitement des demandes jusqu'à ce que la date d'effet soit atteinte ou dépassé.
+En utilisant le pattern Outbox, l'application peut différer le traitement des demandes jusqu'à ce que la date d'effet soit atteinte :
+- On va venir rajouter un "ScheduleDeleveryDate" dans notre entité Outbox
+- On va utilisé un message "ExecuteDemand" qui va etre traité par le worker à la date du "ScheduleDeleveryDate"
+- L'application va ensuite consommer le message pour verifier la date d'effet de la demande. 
+## RAF
+
+Tant que la date d'effet n'est pas atteinte l'état de la demande pourra être modifié et lors de sont traitement le message produit correspondra à sont état à l'instant T.
 
 Un processus séparé peut alors récupérer les entrées de la boîte de sortie, vérifier si la date d'effet est atteinte et traiter la demande en conséquence.
 
 Cela permet de gérer les demandes avec une date d'effet de manière efficace, en évitant le traitement inutile des demandes avant que la date d'effet ne soit atteinte.
-
 
 
 ## Conclusion
