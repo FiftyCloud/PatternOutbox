@@ -6,9 +6,9 @@ Avec Kafka, vous pouvez mettre en place le pattern Outbox de la façon suivante 
 
 - Lorsqu'une modification est apportée à la base de données, insérez un nouvel enregistrement dans la table de la outbox avec les détails de la modification.
 
-- Un background worker écrit en C# (ou autre langage) peut lire la table de la outbox et envoyer les modifications aux systèmes externes en produisant des messages sur un sujet Kafka.
+- Un background worker écrit en C# (ou autre langage) peut lire la table de la outbox et envoyer les modifications aux systèmes externes en produisant des messages sur un topic Kafka.
 
-- Les systèmes externes peuvent ensuite consommer les messages depuis le sujet, appliquer les modifications et mettre à jour leur propre état.
+- Les systèmes externes peuvent ensuite consommer les messages depuis le topic, appliquer les modifications et mettre à jour leur propre état.
 
 - Une fois qu'un message est consommé par le système externe, vous pouvez marquer ce message comme consommé dans la outbox de sorte qu'il ne soit plus produit et archivé.
 
@@ -20,31 +20,62 @@ L'utilisation de Kafka pour la communication entre la outbox et les systèmes ex
 
 Lorsque vous avez une application qui modifie des données dans une base de données, et que ces modifications doivent être reflétées dans un ou plusieurs systèmes externes.
 
-Par exemple, imaginez une application de commerce électronique qui modifie les informations de stock d'un produit dans sa base de données. Les modifications doivent également être reflétées dans le système de gestion de stock externe pour s'assurer que les informations de stock sont synchronisées.
+Par exemple, imaginez une application de multiservice proposant un système de fidélité. Un client souhait effectuer un demande de modification d'information personnel.
 
-Avec la pattern Outbox, lorsque l'application modifie les informations de stock d'un produit dans sa base de données, elle insère également un enregistrement dans la outbox contenant les détails de la modification. Ensuite, un processus séparé lit les enregistrements de la outbox et envoie les modifications aux systèmes externes via Kafka. Le système de gestion de stock externe peut alors consommer les messages de Kafka et mettre à jour son propre état pour refléter les modifications apportées.
+![outbox-sequence-diagram](outbox-simple-diagram.jpg)
 
-## Combiner le pattern outbox et le pattern d'état pour un traitement différé
+Avec la pattern Outbox, lorsque l'application modifie les informations d'un client dans sa base de données, elle insère également un enregistrement dans la outbox contenant les détails de la modification. Ensuite, un processus séparé (worker) lit les enregistrements de la outbox et envoie les modifications aux systèmes externes via Kafka. Le système de gestion des différents service peuvent alors consommer les messages de Kafka et mettre à jour leurs propre état pour refléter les modifications apportées.
+
+L'entité outbox sera alors constitué de la façons suivante : 
+
+```csharp
+ [Table("Outbox")]
+    public class Outbox
+    {
+        [Key] public long Id { get; set; }
+        public string AggregateType { get; set; }
+        public string AggregateId { get; set; }
+        public string EventType { get; set; }
+        public JsonNode Payload { get; set; }
+    }
+```
+
+
+## Différer une demande : retour vers le futur
 
 Dans certain cas fonctionnel vous pouvez avoir besoin de différer votre traitement. 
 
-Imaginez que votre client à souscrit à un abonnement de fidélité de l'application de commerce. L'application possède une fonctionnalité qui permet aux utilisateurs de soumettre des demandes, telles que des demandes de résiliation, qui doi être appliquée à une date future spécifique.
+Imaginez que l'application possède une fonctionnalité qui permet aux utilisateurs de soumettre des demandes, telles que des demandes de résiliation, qui doit être appliquée à une date future spécifique.
 
 Le pattern Outbox peut être combiné avec le pattern d'état pour gérer une date d'effet sur une demande de manière efficace.
 
-Avec le pattern d'état, l'application peut stocker l'état de chaque demande dans la base de données, y compris la date à laquelle la demande doit être appliquée.
+A la réception de la demande, l'application va stocker les informations demande dans la base de données, y compris la date à laquelle la demande doit être appliquée.
 
-En utilisant le pattern Outbox, l'application peut différer le traitement des demandes jusqu'à ce que la date d'effet soit atteinte :
-- On va venir rajouter un "ScheduleDeleveryDate" dans notre entité Outbox
-- On va utilisé un message "ExecuteDemand" qui va etre traité par le worker à la date du "ScheduleDeleveryDate"
-- L'application va ensuite consommer le message pour verifier la date d'effet de la demande. 
-## RAF
+En utilisant le pattern Outbox, l'application peut différer le traitement des demandes jusqu'à ce que la date d'effet soit atteinte.
 
-Tant que la date d'effet n'est pas atteinte l'état de la demande pourra être modifié et lors de sont traitement le message produit correspondra à sont état à l'instant T.
+On va donc compléter l'entité outbox avec un champs **ShecduleDeleveryDate** correspondant a cette date d'effet.
 
-Un processus séparé peut alors récupérer les entrées de la boîte de sortie, vérifier si la date d'effet est atteinte et traiter la demande en conséquence.
+```c#
+ [Table("Outbox")]
+    public class Outbox
+    {
+        [Key] public long Id { get; set; }
+        public string AggregateType { get; set; }
+        public string AggregateId { get; set; }
+        public string EventType { get; set; }
+        public JsonNode Payload { get; set; }
+        public DateTime  ShecduleDeleveryDate { get; set; }
+    }
+```
 
-Cela permet de gérer les demandes avec une date d'effet de manière efficace, en évitant le traitement inutile des demandes avant que la date d'effet ne soit atteinte.
+Le worker peut alors récupérer les entrées de la outbox seulement les messages dont la **ScheduleDeleveryDate** est atteinte ou dépassé.
+
+Cela permet de gérer les demandes avec une date d'effet de manière efficace, en évitant le traitement inutile des demandes avant que la date d'effet ne soit atteinte. 
+En implémentant le pattern d'état sur la demande on pourras fonctionner en deux étapes :
+   - A la réception la demande est dans un état initial, envoyer un message dans la outbox avec un ScheduleDeleveryDate dans le futur. 
+   - Ce message sera consommé par le service pour exécuter la demande à la date d'effet pour changer l'état de la demande et envoyer le message correspondant à ce nouvel état à destination des autres services.
+
+Ainsi tant que la date d'effet n'est pas atteinte la demande pourra être modifié en changeant son état vers l'état annulé par exemple si le client souhait revenir sur ça demande de résiliation.
 
 
 ## Conclusion
